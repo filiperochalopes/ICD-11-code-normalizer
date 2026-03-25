@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.db.models import NormalizedResult
 from app.main import app
 
 
@@ -43,3 +44,6 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
         },
     ]
 
+    stored_result = db_session.query(NormalizedResult).filter_by(normalized_code="AB12&CD34").one()
+    assert stored_result.title == "Alpha condition + Delta qualifier"
+    assert stored_result.ai_phrase is None

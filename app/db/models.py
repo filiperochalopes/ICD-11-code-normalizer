@@ -61,3 +61,26 @@ class GeneratedCache(Base):
         nullable=False,
         default=utc_now,
     )
+
+
+class NormalizedResult(Base):
+    __tablename__ = "normalized_results"
+    __table_args__ = (
+        Index("ix_normalized_results_normalized_code", "normalized_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    normalized_code: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    ai_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )

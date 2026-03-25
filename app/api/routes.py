@@ -10,6 +10,7 @@ from app.db.session import get_db_session
 from app.services.ai_phrase import AIPhraseService
 from app.services.cache import CacheService
 from app.services.normalizer import NormalizationError, NormalizerService
+from app.services.results_store import NormalizedResultsService
 from app.services.title_builder import TitleBuilderService
 
 
@@ -31,6 +32,7 @@ def normalize_codes(
     title_builder = TitleBuilderService()
     cache_service = CacheService(db)
     ai_service = AIPhraseService()
+    normalized_results_service = NormalizedResultsService(db)
 
     results: list[NormalizeResultItem] = []
 
@@ -69,7 +71,13 @@ def normalize_codes(
                             model_name=ai_service.model_name,
                             prompt_version=ai_service.prompt_version,
                         )
-                        db.commit()
+
+            normalized_results_service.upsert_result(
+                normalized_code=normalization_result.normalized_code,
+                title=title,
+                ai_phrase=ai_phrase,
+            )
+            db.commit()
 
             results.append(
                 NormalizeResultItem(
@@ -94,4 +102,3 @@ def normalize_codes(
             )
 
     return NormalizeResponse(results=results)
-

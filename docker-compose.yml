@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      APP_PORT: 8000
+      SQLITE_PATH: /data/app.db
+      AUTH_TOKEN: ${AUTH_TOKEN:-change-me}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-45}
+      PROMPT_VERSION: ${PROMPT_VERSION:-v1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SIMPLE_TABULATION_ZIP_URL: ${SIMPLE_TABULATION_ZIP_URL:-https://icdcdn.who.int/static/releasefiles/2024-01/SimpleTabulation-ICD-11-MMS-en.zip}
+    volumes:
+      - ./data:/data
+

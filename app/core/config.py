@@ -1,0 +1,75 @@
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_SIMPLE_TABULATION_ZIP_URL = (
+    "https://icdcdn.who.int/static/releasefiles/2024-01/"
+    "SimpleTabulation-ICD-11-MMS-en.zip"
+)
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    app_name: str = Field(default="icd11-code-normalizer", alias="APP_NAME")
+    app_env: str = Field(default="development", alias="APP_ENV")
+    app_port: int = Field(default=8000, alias="APP_PORT")
+    auth_token: str = Field(default="change-me", alias="AUTH_TOKEN")
+    sqlite_path: str = Field(default="/data/app.db", alias="SQLITE_PATH")
+    simple_tabulation_zip_url: str = Field(
+        default=DEFAULT_SIMPLE_TABULATION_ZIP_URL,
+        alias="SIMPLE_TABULATION_ZIP_URL",
+    )
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        alias="OPENROUTER_BASE_URL",
+    )
+    openrouter_model: str = Field(default="openrouter/free", alias="OPENROUTER_MODEL")
+    llm_timeout_seconds: int = Field(default=45, alias="LLM_TIMEOUT_SECONDS")
+    prompt_version: str = Field(default="v1", alias="PROMPT_VERSION")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    @property
+    def database_url(self) -> str:
+        if self.sqlite_path.startswith("sqlite"):
+            return self.sqlite_path
+        if self.sqlite_path == ":memory:":
+            return "sqlite+pysqlite:///:memory:"
+        return f"sqlite+pysqlite:///{self.sqlite_path}"
+
+    @staticmethod
+    def mask_secret(value: str) -> str:
+        if not value:
+            return "<not-set>"
+        if len(value) <= 8:
+            return "*" * len(value)
+        return f"{value[:4]}...{value[-4:]}"
+
+    def public_summary(self) -> dict[str, str | int]:
+        return {
+            "app_name": self.app_name,
+            "app_env": self.app_env,
+            "app_port": self.app_port,
+            "sqlite_path": self.sqlite_path,
+            "simple_tabulation_zip_url": self.simple_tabulation_zip_url,
+            "auth_token": self.mask_secret(self.auth_token),
+            "openrouter_api_key": self.mask_secret(self.openrouter_api_key),
+            "openrouter_base_url": self.openrouter_base_url,
+            "openrouter_model": self.openrouter_model,
+            "llm_timeout_seconds": self.llm_timeout_seconds,
+            "prompt_version": self.prompt_version,
+            "log_level": self.log_level,
+        }
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

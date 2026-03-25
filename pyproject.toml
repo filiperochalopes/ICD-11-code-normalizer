@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "icd11-code-normalizer"
+version = "0.1.0"
+description = "Microservice for ICD-11 post-coordination normalization and title generation."
+readme = "README.md"
+requires-python = ">=3.12"
+
+[project.scripts]
+app = "app.cli.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

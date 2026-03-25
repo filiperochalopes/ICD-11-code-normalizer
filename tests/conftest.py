@@ -18,6 +18,8 @@ def db_session(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_TOKEN", "test-token")
     monkeypatch.setenv("SQLITE_PATH", str(database_path))
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("OCL_TOKEN", "")
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", "/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/")
 
     reset_settings_state()
     init_db()
@@ -82,4 +84,3 @@ def seeded_reference_data(db_session):
     db_session.add_all(rows)
     db_session.commit()
     return rows
-

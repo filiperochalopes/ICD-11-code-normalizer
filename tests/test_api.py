@@ -47,3 +47,37 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
     stored_result = db_session.query(NormalizedResult).filter_by(normalized_code="AB12&CD34").one()
     assert stored_result.title == "Alpha condition + Delta qualifier"
     assert stored_result.ai_phrase is None
+
+
+def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_data):
+    calls = []
+
+    def fake_sync(self, normalized_code, title, ai_phrase=None, ai_model_name=None):
+        calls.append(
+            {
+                "normalized_code": normalized_code,
+                "title": title,
+                "ai_phrase": ai_phrase,
+                "ai_model_name": ai_model_name,
+            }
+        )
+        return True
+
+    monkeypatch.setattr("app.api.routes.OCLSyncService.sync_normalized_result", fake_sync)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/normalize",
+            headers={"Authorization": "Bearer test-token"},
+            json={"codes": ["AB12&CD34"], "include_ai_phrase": False},
+        )
+
+    assert response.status_code == 200
+    assert calls == [
+        {
+            "normalized_code": "AB12&CD34",
+            "title": "Alpha condition + Delta qualifier",
+            "ai_phrase": None,
+            "ai_model_name": None,
+        }
+    ]

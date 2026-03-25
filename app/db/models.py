@@ -55,6 +55,7 @@ class GeneratedCache(Base):
     ai_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     model_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolved_model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     response_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

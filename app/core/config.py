@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     openrouter_model: str = Field(default="openrouter/free", alias="OPENROUTER_MODEL")
     llm_timeout_seconds: int = Field(default=45, alias="LLM_TIMEOUT_SECONDS")
     prompt_version: str = Field(default="v1", alias="PROMPT_VERSION")
+    ocl_base_url: str = Field(
+        default="https://api.openconceptlab.org",
+        alias="OCL_BASE_URL",
+    )
+    ocl_token: str = Field(default="", alias="OCL_TOKEN")
+    ocl_lookup_source: str = Field(
+        default="/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/",
+        alias="OCL_LOOKUP_SOURCE",
+    )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     @property
@@ -66,6 +75,9 @@ class Settings(BaseSettings):
             "openrouter_model": self.openrouter_model,
             "llm_timeout_seconds": self.llm_timeout_seconds,
             "prompt_version": self.prompt_version,
+            "ocl_base_url": self.ocl_base_url,
+            "ocl_token": self.mask_secret(self.ocl_token),
+            "ocl_lookup_source": self.ocl_lookup_source,
             "log_level": self.log_level,
         }
 

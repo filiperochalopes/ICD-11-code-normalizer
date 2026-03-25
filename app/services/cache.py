@@ -52,6 +52,7 @@ class CacheService:
         ai_phrase: str,
         model_name: str,
         prompt_version: str,
+        resolved_model_name: str | None = None,
     ) -> GeneratedCache:
         response_hash = self.build_response_hash(
             normalized_code=normalized_code,
@@ -75,6 +76,7 @@ class CacheService:
             ai_phrase=ai_phrase,
             prompt_version=prompt_version,
             model_name=model_name,
+            resolved_model_name=resolved_model_name,
             response_hash=response_hash,
         )
         self.session.add(cached)
@@ -100,4 +102,3 @@ class CacheService:
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-

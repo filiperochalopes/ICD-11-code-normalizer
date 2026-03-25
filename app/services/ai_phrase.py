@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from app.core.config import get_settings
 from app.services.normalizer import CodeComponent
@@ -26,6 +27,13 @@ Basic concatenated title:
 """
 
 
+@dataclass(slots=True)
+class AIPhraseResult:
+    text: str
+    requested_model_name: str
+    resolved_model_name: str
+
+
 class AIPhraseService:
     def __init__(self) -> None:
         settings = get_settings()
@@ -38,7 +46,7 @@ class AIPhraseService:
         normalized_code: str,
         components: list[CodeComponent],
         basic_title: str,
-    ) -> str | None:
+    ) -> AIPhraseResult | None:
         if not self._settings.openrouter_api_key.strip():
             logger.info("Skipping AI phrase generation because OPENROUTER_API_KEY is not configured")
             return None
@@ -67,7 +75,15 @@ class AIPhraseService:
                     "basic_title": basic_title,
                 }
             )
-            return self._extract_content(response.content)
+            text = self._extract_content(response.content)
+            if not text:
+                return None
+
+            return AIPhraseResult(
+                text=text,
+                requested_model_name=self.model_name,
+                resolved_model_name=self._extract_model_name(response),
+            )
         except Exception:
             logger.exception("LLM error while generating AI phrase")
             return None
@@ -98,3 +114,15 @@ class AIPhraseService:
             return merged or None
 
         return None
+
+    def _extract_model_name(self, response) -> str:
+        response_metadata = getattr(response, "response_metadata", {}) or {}
+        if not isinstance(response_metadata, dict):
+            return self.model_name
+
+        for key in ("model", "model_name"):
+            value = response_metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        return self.model_name

@@ -44,6 +44,7 @@ app create-token
 ```
 
 3. Ajuste `AUTH_TOKEN` no `.env`.
+4. Se quiser sincronizar com o OCL, configure `OCL_TOKEN` e `OCL_LOOKUP_SOURCE` no `.env`.
 
 ## Seed inicial
 
@@ -149,4 +150,5 @@ pytest
 
 - Se `OPENROUTER_API_KEY` nao estiver configurada, a API continua funcionando e retorna apenas `title`.
 - O cache do LLM usa `normalized_code`, `title`, `include_ai_phrase`, `model_name` e `prompt_version`.
+- Quando `OCL_TOKEN` e `OCL_LOOKUP_SOURCE` estao configurados, cada normalizacao tambem sincroniza o conceito no OCL.
 - Logs de importacao, cache, parsing e tempo de resposta sao enviados para stdout.

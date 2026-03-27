@@ -52,13 +52,21 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
 def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_data):
     calls = []
 
-    def fake_sync(self, normalized_code, title, ai_phrase=None, ai_model_name=None):
+    def fake_sync(
+        self,
+        normalized_code,
+        title,
+        ai_phrase=None,
+        ai_model_name=None,
+        components=None,
+    ):
         calls.append(
             {
                 "normalized_code": normalized_code,
                 "title": title,
                 "ai_phrase": ai_phrase,
                 "ai_model_name": ai_model_name,
+                "components": [component.code for component in components or []],
             }
         )
         return True
@@ -79,5 +87,6 @@ def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_d
             "title": "Alpha condition + Delta qualifier",
             "ai_phrase": None,
             "ai_model_name": None,
+            "components": ["AB12", "CD34"],
         }
     ]

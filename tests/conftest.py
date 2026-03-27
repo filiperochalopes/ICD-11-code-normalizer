@@ -38,11 +38,16 @@ def seeded_reference_data(db_session):
         SimpleTabulationCode(
             code="AB12",
             title="Alpha condition",
-            parent_code=None,
+            parent_code="BLOCK-1",
             is_extension=False,
             sort_key=10,
             chapter_or_group="01",
-            raw_row_json={"Code": "AB12"},
+            raw_row_json={
+                "Code": "AB12",
+                "ChapterNo": "01",
+                "BlockId": "BLOCK-1",
+                "ClassKind": "category",
+            },
         ),
         SimpleTabulationCode(
             code="CD34",
@@ -51,7 +56,38 @@ def seeded_reference_data(db_session):
             is_extension=False,
             sort_key=20,
             chapter_or_group="01",
-            raw_row_json={"Code": "CD34"},
+            raw_row_json={
+                "Code": "CD34",
+                "ChapterNo": "01",
+                "BlockId": "BLOCK-2",
+                "ClassKind": "category",
+            },
+        ),
+        SimpleTabulationCode(
+            code="BLOCK-1",
+            title="Block One",
+            parent_code="CH1",
+            is_extension=False,
+            sort_key=5,
+            chapter_or_group="01",
+            raw_row_json={
+                "Code": "BLOCK-1",
+                "ChapterNo": "01",
+                "ClassKind": "block",
+            },
+        ),
+        SimpleTabulationCode(
+            code="CH1",
+            title="Chapter One",
+            parent_code=None,
+            is_extension=False,
+            sort_key=1,
+            chapter_or_group="01",
+            raw_row_json={
+                "Code": "CH1",
+                "ChapterNo": "01",
+                "ClassKind": "chapter",
+            },
         ),
         SimpleTabulationCode(
             code="XA123",
@@ -60,7 +96,7 @@ def seeded_reference_data(db_session):
             is_extension=True,
             sort_key=100,
             chapter_or_group="X",
-            raw_row_json={"Code": "XA123"},
+            raw_row_json={"Code": "XA123", "ClassKind": "extension"},
         ),
         SimpleTabulationCode(
             code="XT9",
@@ -69,7 +105,7 @@ def seeded_reference_data(db_session):
             is_extension=True,
             sort_key=30,
             chapter_or_group="X",
-            raw_row_json={"Code": "XT9"},
+            raw_row_json={"Code": "XT9", "ClassKind": "extension"},
         ),
         SimpleTabulationCode(
             code="XY456",
@@ -78,7 +114,7 @@ def seeded_reference_data(db_session):
             is_extension=True,
             sort_key=40,
             chapter_or_group="X",
-            raw_row_json={"Code": "XY456"},
+            raw_row_json={"Code": "XY456", "ClassKind": "extension"},
         ),
     ]
     db_session.add_all(rows)

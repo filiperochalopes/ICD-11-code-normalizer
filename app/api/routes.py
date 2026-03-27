@@ -33,7 +33,7 @@ def normalize_codes(
     title_builder = TitleBuilderService()
     cache_service = CacheService(db)
     ai_service = AIPhraseService()
-    ocl_sync_service = OCLSyncService()
+    ocl_sync_service = OCLSyncService(db)
     normalized_results_service = NormalizedResultsService(db)
 
     results: list[NormalizeResultItem] = []
@@ -90,6 +90,7 @@ def normalize_codes(
                 title=title,
                 ai_phrase=ai_phrase,
                 ai_model_name=ai_model_name,
+                components=normalization_result.components,
             )
 
             results.append(

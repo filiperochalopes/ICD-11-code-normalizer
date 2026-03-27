@@ -1,10 +1,15 @@
 import logging
 import re
+from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.models import SimpleTabulationCode
+from app.services.normalizer import CodeComponent
 
 
 logger = logging.getLogger(__name__)
@@ -18,9 +23,15 @@ AUTO_DESCRIPTION_TEMPLATE = (
 )
 
 
+@dataclass(slots=True)
+class OCLConceptMetadata:
+    extras: dict[str, object]
+
+
 class OCLSyncService:
-    def __init__(self, client_factory=None) -> None:
+    def __init__(self, session: Session | None = None, client_factory=None) -> None:
         self._settings = get_settings()
+        self._session = session
         self._client_factory = client_factory or httpx.Client
 
     def sync_normalized_result(
@@ -29,6 +40,7 @@ class OCLSyncService:
         title: str,
         ai_phrase: str | None = None,
         ai_model_name: str | None = None,
+        components: list[CodeComponent] | None = None,
     ) -> bool:
         if not self._settings.ocl_token.strip() or not self._settings.ocl_lookup_source.strip():
             logger.info("Skipping OCL sync because OCL_TOKEN or OCL_LOOKUP_SOURCE is not configured")
@@ -36,16 +48,28 @@ class OCLSyncService:
 
         headers = {"Authorization": f"Token {self._settings.ocl_token.strip()}"}
         source_base_url = self._build_source_base_url()
+        metadata = self._resolve_concept_metadata(components)
 
         try:
             with self._client_factory(timeout=30.0, follow_redirects=True) as client:
-                if not self._concept_exists(client, source_base_url, headers, normalized_code):
+                concept = self._get_concept(client, source_base_url, headers, normalized_code)
+                if concept is None:
                     self._create_concept(
                         client=client,
                         source_base_url=source_base_url,
                         headers=headers,
                         normalized_code=normalized_code,
                         title=title,
+                        metadata=metadata,
+                    )
+                else:
+                    self._update_concept_if_needed(
+                        client=client,
+                        source_base_url=source_base_url,
+                        headers=headers,
+                        normalized_code=normalized_code,
+                        concept=concept,
+                        metadata=metadata,
                     )
 
                 names = self._list_names(client, source_base_url, headers, normalized_code)
@@ -89,18 +113,21 @@ class OCLSyncService:
             logger.exception("OCL sync failed for normalized_code=%s", normalized_code)
             return False
 
-    def _concept_exists(
+    def _get_concept(
         self,
         client: httpx.Client,
         source_base_url: str,
         headers: dict[str, str],
         normalized_code: str,
-    ) -> bool:
+    ) -> dict | None:
         response = client.get(self._concept_url(source_base_url, normalized_code), headers=headers)
         if response.status_code == 404:
-            return False
+            return None
         response.raise_for_status()
-        return True
+        payload = response.json()
+        if isinstance(payload, dict):
+            return payload
+        return {}
 
     def _create_concept(
         self,
@@ -109,17 +136,36 @@ class OCLSyncService:
         headers: dict[str, str],
         normalized_code: str,
         title: str,
+        metadata: OCLConceptMetadata,
     ) -> None:
         payload = {
             "id": normalized_code,
-            "concept_class": "Diagnosis",
-            "datatype": "N/A",
             "retired": False,
+            **self._concept_payload(metadata),
             "names": [self._fully_specified_payload(title)],
         }
         response = client.post(f"{source_base_url}/concepts/", json=payload, headers=headers)
         if response.status_code not in {200, 201, 409}:
             response.raise_for_status()
+
+    def _update_concept_if_needed(
+        self,
+        client: httpx.Client,
+        source_base_url: str,
+        headers: dict[str, str],
+        normalized_code: str,
+        concept: dict,
+        metadata: OCLConceptMetadata,
+    ) -> None:
+        payload = self._concept_payload(metadata, concept.get("extras"))
+        if self._concept_matches(concept, payload):
+            return
+
+        client.patch(
+            self._concept_url(source_base_url, normalized_code),
+            json=payload,
+            headers=headers,
+        ).raise_for_status()
 
     def _list_names(
         self,
@@ -258,6 +304,107 @@ class OCLSyncService:
                 return results
         return []
 
+    def _resolve_concept_metadata(
+        self,
+        components: list[CodeComponent] | None,
+    ) -> OCLConceptMetadata:
+        extras: dict[str, object] = {"isLeaf": True}
+        first_stem_row = self._find_first_stem_row(components)
+        if first_stem_row is None:
+            return OCLConceptMetadata(extras=extras)
+
+        chapter_no = self._clean_metadata_value(
+            first_stem_row.raw_row_json.get("ChapterNo")
+            or first_stem_row.chapter_or_group
+        )
+        if chapter_no is not None:
+            extras["ChapterNo"] = chapter_no
+
+        block_id = self._resolve_block_id(first_stem_row)
+        if block_id is not None:
+            extras["BlockId"] = block_id
+
+        return OCLConceptMetadata(extras=extras)
+
+    def _find_first_stem_row(
+        self,
+        components: list[CodeComponent] | None,
+    ) -> SimpleTabulationCode | None:
+        if self._session is None or not components:
+            return None
+
+        first_stem_code = None
+        for component in components:
+            if not component.is_extension:
+                first_stem_code = component.code
+                break
+
+        if first_stem_code is None:
+            first_stem_code = components[0].code if components else None
+        if first_stem_code is None:
+            return None
+
+        return self._session.scalar(
+            select(SimpleTabulationCode).where(SimpleTabulationCode.code == first_stem_code)
+        )
+
+    def _resolve_block_id(self, row: SimpleTabulationCode) -> str | None:
+        direct_block_id = self._clean_metadata_value(row.raw_row_json.get("BlockId"))
+        if direct_block_id is not None:
+            return direct_block_id
+
+        if self._session is None:
+            return None
+
+        visited_codes = {row.code}
+        parent_code = row.parent_code
+
+        while parent_code:
+            if parent_code in visited_codes:
+                break
+            visited_codes.add(parent_code)
+
+            parent_row = self._session.scalar(
+                select(SimpleTabulationCode).where(SimpleTabulationCode.code == parent_code)
+            )
+            if parent_row is None:
+                break
+
+            class_kind = self._normalize_name_marker(parent_row.raw_row_json.get("ClassKind"))
+            if class_kind == "block":
+                return self._clean_metadata_value(parent_row.code)
+
+            parent_code = parent_row.parent_code
+
+        return None
+
+    @staticmethod
+    def _clean_metadata_value(value: object) -> str | None:
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.lower() in {"none", "nan", "null"}:
+            return None
+        return text
+
+    @staticmethod
+    def _concept_payload(
+        metadata: OCLConceptMetadata,
+        existing_extras: dict[str, object] | object | None = None,
+    ) -> dict[str, object]:
+        merged_extras = {}
+        if isinstance(existing_extras, dict):
+            merged_extras.update(existing_extras)
+        merged_extras.update(metadata.extras)
+        return {
+            "concept_class": "Diagnosis",
+            "datatype": "N/A",
+            "extras": merged_extras,
+        }
+
     @staticmethod
     def _normalize_name_marker(value: str | None) -> str:
         return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
@@ -343,6 +490,26 @@ class OCLSyncService:
             existing.get("description") == payload["description"]
             and existing.get("locale") == payload["locale"]
             and existing.get("locale_preferred") == payload["locale_preferred"]
+        )
+
+    @staticmethod
+    def _concept_matches(existing: dict, payload: dict[str, object]) -> bool:
+        existing_extras = existing.get("extras")
+        if not isinstance(existing_extras, dict):
+            existing_extras = {}
+
+        payload_extras = payload.get("extras")
+        if not isinstance(payload_extras, dict):
+            payload_extras = {}
+
+        managed_extras_match = all(
+            existing_extras.get(key) == value for key, value in payload_extras.items()
+        )
+
+        return (
+            existing.get("concept_class") == payload["concept_class"]
+            and existing.get("datatype") == payload["datatype"]
+            and managed_extras_match
         )
 
     @staticmethod

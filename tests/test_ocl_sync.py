@@ -110,8 +110,20 @@ class FakeOCLClient:
 
 def build_components():
     return [
-        CodeComponent(code="AB12", separator=None, original_position=0, is_extension=False),
-        CodeComponent(code="CD34", separator="&", original_position=1, is_extension=False),
+        CodeComponent(
+            code="AB12",
+            separator=None,
+            original_position=0,
+            is_stem=True,
+            is_extension=False,
+        ),
+        CodeComponent(
+            code="CD34",
+            separator="&",
+            original_position=1,
+            is_stem=False,
+            is_extension=True,
+        ),
     ]
 
 
@@ -145,7 +157,7 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
 
     synced = service.sync_normalized_result(
         normalized_code="AB12&CD34",
-        title="Alpha condition + Delta qualifier",
+        title="Alpha condition [Delta qualifier]",
         ai_phrase="Alpha condition with delta qualifier",
         ai_model_name="google/gemini-test",
         components=build_components(),
@@ -161,7 +173,7 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
         "extras": {"isLeaf": True, "ChapterNo": "01", "BlockId": "BLOCK-1"},
         "names": [
             {
-                "name": "Alpha condition + Delta qualifier",
+                "name": "Alpha condition [Delta qualifier]",
                 "locale": "en",
                 "locale_preferred": True,
                 "name_type": "FULLY_SPECIFIED",
@@ -224,7 +236,7 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
                 "locale_preferred": False,
                 "name_type": None,
                 "type": "ConceptName",
-            },
+            }
         ],
         "descriptions": [
             {
@@ -244,7 +256,7 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
 
     synced = service.sync_normalized_result(
         normalized_code="AB12&CD34",
-        title="New title",
+        title="New title [New qualifier]",
         ai_phrase="New synonym",
         ai_model_name="new-model",
         components=build_components(),
@@ -264,7 +276,7 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
     assert state["concept_class"] == "Diagnosis"
     assert state["datatype"] == "N/A"
     assert state["extras"] == {"isLeaf": True, "ChapterNo": "01", "BlockId": "BLOCK-1"}
-    assert state["names"][0]["name"] == "New title"
+    assert state["names"][0]["name"] == "New title [New qualifier]"
     assert state["names"][1]["name"] == "New synonym"
     assert state["descriptions"][0]["description"] == AUTO_DESCRIPTION_TEMPLATE.format(
         model_name="new-model"

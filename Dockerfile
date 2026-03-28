@@ -12,9 +12,10 @@ COPY scripts ./scripts
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /data
+RUN mkdir -p /data \
+    && chmod +x /srv/app/scripts/entrypoint.sh
 
 EXPOSE 8000
 
+ENTRYPOINT ["/srv/app/scripts/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-

@@ -20,7 +20,7 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
             "/normalize",
             headers={"Authorization": "Bearer test-token"},
             json={
-                "codes": ["XA123&XY456/XT9", "AB12&CD34"],
+                "codes": ["AB12&CD34/EF56", "1A0Y&XN6BM/MG51.00"],
                 "include_ai_phrase": False,
             },
         )
@@ -29,23 +29,26 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
     payload = response.json()
     assert payload["results"] == [
         {
-            "input_code": "XA123&XY456/XT9",
-            "normalized_code": "XA123/XT9&XY456",
-            "title": "Alpha extension / Theta extension + Psi extension",
+            "input_code": "AB12&CD34/EF56",
+            "normalized_code": "EF56/AB12&CD34",
+            "title": "Echo disorder / Alpha condition [Delta qualifier]",
             "ai_phrase": None,
             "from_cache": False,
         },
         {
-            "input_code": "AB12&CD34",
-            "normalized_code": "AB12&CD34",
-            "title": "Alpha condition + Delta qualifier",
+            "input_code": "1A0Y&XN6BM/MG51.00",
+            "normalized_code": "1A0Y&XN6BM/MG51.00",
+            "title": (
+                "Other specified bacterial intestinal infections "
+                "[Staphylococcus aureus] / Methicillin resistant Staphylococcus aureus"
+            ),
             "ai_phrase": None,
             "from_cache": False,
         },
     ]
 
-    stored_result = db_session.query(NormalizedResult).filter_by(normalized_code="AB12&CD34").one()
-    assert stored_result.title == "Alpha condition + Delta qualifier"
+    stored_result = db_session.query(NormalizedResult).filter_by(normalized_code="EF56/AB12&CD34").one()
+    assert stored_result.title == "Echo disorder / Alpha condition [Delta qualifier]"
     assert stored_result.ai_phrase is None
 
 
@@ -84,7 +87,7 @@ def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_d
     assert calls == [
         {
             "normalized_code": "AB12&CD34",
-            "title": "Alpha condition + Delta qualifier",
+            "title": "Alpha condition [Delta qualifier]",
             "ai_phrase": None,
             "ai_model_name": None,
             "components": ["AB12", "CD34"],

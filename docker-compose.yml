@@ -4,6 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      APP_NAME: ${APP_NAME:-icd11-code-normalizer}
       APP_ENV: production
       APP_PORT: 8000
       SQLITE_PATH: /data/app.db
@@ -13,8 +14,10 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-45}
       PROMPT_VERSION: ${PROMPT_VERSION:-v1}
+      OCL_BASE_URL: ${OCL_BASE_URL:-https://api.openconceptlab.org}
+      OCL_TOKEN: ${OCL_TOKEN:-}
+      OCL_LOOKUP_SOURCE: ${OCL_LOOKUP_SOURCE:-/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SIMPLE_TABULATION_ZIP_URL: ${SIMPLE_TABULATION_ZIP_URL:-https://icdcdn.who.int/static/releasefiles/2024-01/SimpleTabulation-ICD-11-MMS-en.zip}
     volumes:
       - ./data:/data
-

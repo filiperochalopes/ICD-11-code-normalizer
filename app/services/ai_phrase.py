@@ -90,10 +90,19 @@ class AIPhraseService:
 
     @staticmethod
     def _render_components(components: list[CodeComponent]) -> str:
-        return "\n".join(
-            f"- {component.code}: {component.title or f'Unknown code {component.code}'}"
-            for component in components
-        )
+        rendered: list[str] = []
+        stem_index = 0
+
+        for component in components:
+            label = component.title or f"Unknown code {component.code}"
+            if component.is_stem:
+                stem_index += 1
+                rendered.append(f"- Stem {stem_index}: {component.code}: {label}")
+                continue
+
+            rendered.append(f"  - Extension for stem {stem_index}: {component.code}: {label}")
+
+        return "\n".join(rendered)
 
     @staticmethod
     def _extract_content(content: str | list[dict] | list[str]) -> str | None:

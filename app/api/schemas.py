@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class NormalizeRequest(BaseModel):
     codes: list[str] = Field(..., min_length=1)
-    include_ai_phrase: bool = False
+    include_ai_phrase: bool = True
 
     @field_validator("codes")
     @classmethod
@@ -27,4 +27,3 @@ class NormalizeResultItem(BaseModel):
 
 class NormalizeResponse(BaseModel):
     results: list[NormalizeResultItem]
-

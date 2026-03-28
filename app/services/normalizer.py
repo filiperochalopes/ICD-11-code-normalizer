@@ -21,9 +21,17 @@ class CodeComponent:
     code: str
     separator: str | None
     original_position: int
+    is_stem: bool
     is_extension: bool = False
     sort_key: int | None = None
     title: str | None = None
+
+
+@dataclass(slots=True)
+class CodeCluster:
+    stem: CodeComponent
+    extensions: list[CodeComponent]
+    original_position: int
 
 
 @dataclass(slots=True)
@@ -38,12 +46,21 @@ class NormalizerService:
         self.session = session
 
     def normalize(self, raw_expression: str) -> NormalizationResult:
-        components = self._tokenize(raw_expression)
+        # Business rule:
+        # - "/" separates stem groups from one another.
+        # - "&" attaches extension codes to the immediately preceding stem.
+        # - stems are sorted among themselves.
+        # - extensions are sorted only inside their own stem group.
+        # This preserves stem -> extension linkage after normalization.
+        clusters = self._tokenize_clusters(raw_expression)
+        components = self._flatten_tokenized_clusters(clusters)
         self._hydrate_components(components)
 
-        anchor = components[0]
-        trailing = sorted(components[1:], key=self._sort_key_for_component)
-        ordered_components = [anchor, *trailing]
+        ordered_clusters = sorted(clusters, key=self._sort_key_for_cluster)
+        for cluster in ordered_clusters:
+            cluster.extensions.sort(key=self._sort_key_for_component)
+
+        ordered_components = self._flatten_normalized_clusters(ordered_clusters)
         normalized_code = self._build_expression(ordered_components)
 
         return NormalizationResult(
@@ -52,7 +69,7 @@ class NormalizerService:
             components=ordered_components,
         )
 
-    def _tokenize(self, raw_expression: str) -> list[CodeComponent]:
+    def _tokenize_clusters(self, raw_expression: str) -> list[CodeCluster]:
         cleaned_expression = raw_expression.strip().upper()
         if not cleaned_expression:
             raise NormalizationError("ICD-11 expression is empty.")
@@ -60,39 +77,62 @@ class NormalizerService:
         parts = [
             part.strip()
             for part in TOKEN_SPLIT_PATTERN.split(cleaned_expression)
-            if part and part.strip()
+            if part is not None
         ]
-        if not parts:
-            raise NormalizationError("ICD-11 expression is empty after tokenization.")
-        if parts[0] in {"/", "&"}:
+        if not parts or parts[0] in {"/", "&"}:
             raise NormalizationError("Expression cannot start with a separator.")
+        if parts[-1] in {"/", "&"}:
+            raise NormalizationError("Expression cannot end with a separator.")
 
-        components = [CodeComponent(code=parts[0], separator=None, original_position=0)]
-        index = 1
-        position = 1
+        raw_clusters = [segment.strip() for segment in cleaned_expression.split("/")]
+        if any(not segment for segment in raw_clusters):
+            raise NormalizationError("Expression contains empty stem groups.")
 
-        while index < len(parts):
-            separator = parts[index]
-            if separator not in {"/", "&"}:
-                raise NormalizationError(f"Unexpected token {separator!r} in expression.")
-            if index + 1 >= len(parts):
-                raise NormalizationError("Expression cannot end with a separator.")
+        clusters: list[CodeCluster] = []
+        position = 0
 
-            code = parts[index + 1].strip()
-            if code in {"/", "&"}:
-                raise NormalizationError("Expression contains consecutive separators.")
+        for cluster_position, raw_cluster in enumerate(raw_clusters):
+            raw_codes = [segment.strip() for segment in raw_cluster.split("&")]
+            if any(not code for code in raw_codes):
+                raise NormalizationError("Expression contains empty extension codes.")
 
-            components.append(
-                CodeComponent(
-                    code=code,
-                    separator=separator,
-                    original_position=position,
-                )
+            stem = CodeComponent(
+                code=raw_codes[0],
+                separator=None,
+                original_position=position,
+                is_stem=True,
             )
-            index += 2
             position += 1
 
-        return components
+            extensions: list[CodeComponent] = []
+            for code in raw_codes[1:]:
+                extensions.append(
+                    CodeComponent(
+                        code=code,
+                        separator="&",
+                        original_position=position,
+                        is_stem=False,
+                    )
+                )
+                position += 1
+
+            clusters.append(
+                CodeCluster(
+                    stem=stem,
+                    extensions=extensions,
+                    original_position=cluster_position,
+                )
+            )
+
+        return clusters
+
+    @staticmethod
+    def _flatten_tokenized_clusters(clusters: list[CodeCluster]) -> list[CodeComponent]:
+        flattened: list[CodeComponent] = []
+        for cluster in clusters:
+            flattened.append(cluster.stem)
+            flattened.extend(cluster.extensions)
+        return flattened
 
     def _hydrate_components(self, components: list[CodeComponent]) -> None:
         codes = [component.code for component in components]
@@ -122,6 +162,26 @@ class NormalizerService:
         )
 
     @staticmethod
+    def _sort_key_for_cluster(cluster: CodeCluster) -> tuple[int, int, int]:
+        stem = cluster.stem
+        return (
+            1 if stem.sort_key is None else 0,
+            stem.sort_key or 10**12,
+            cluster.original_position,
+        )
+
+    @staticmethod
+    def _flatten_normalized_clusters(clusters: list[CodeCluster]) -> list[CodeComponent]:
+        flattened: list[CodeComponent] = []
+        for cluster_index, cluster in enumerate(clusters):
+            cluster.stem.separator = None if cluster_index == 0 else "/"
+            flattened.append(cluster.stem)
+            for extension in cluster.extensions:
+                extension.separator = "&"
+                flattened.append(extension)
+        return flattened
+
+    @staticmethod
     def _build_expression(components: list[CodeComponent]) -> str:
         if not components:
             return ""
@@ -130,4 +190,3 @@ class NormalizerService:
         for component in components[1:]:
             expression_parts.append(f"{component.separator}{component.code}")
         return "".join(expression_parts)
-

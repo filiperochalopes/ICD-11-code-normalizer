@@ -335,7 +335,7 @@ class OCLSyncService:
 
         first_stem_code = None
         for component in components:
-            if not component.is_extension:
+            if component.is_stem:
                 first_stem_code = component.code
                 break
 

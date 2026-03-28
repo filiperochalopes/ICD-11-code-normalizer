@@ -47,6 +47,11 @@ def seeded_reference_data(db_session):
                 "ChapterNo": "01",
                 "BlockId": "BLOCK-1",
                 "ClassKind": "category",
+                "Foundation URI": "http://foundation.example/AB12",
+                "Linearization URI": "http://linearization.example/AB12",
+                "DepthInKind": "2",
+                "IsResidual": "False",
+                "BrowserLink": "https://browser.example/AB12",
             },
         ),
         SimpleTabulationCode(

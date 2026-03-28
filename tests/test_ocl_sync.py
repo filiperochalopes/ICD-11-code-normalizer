@@ -1,9 +1,22 @@
+from urllib.parse import quote
+
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.db.models import SimpleTabulationCode
 from app.services.normalizer import CodeComponent
-from app.core.config import get_settings
 from app.services.ocl_sync import AUTO_DESCRIPTION_TEMPLATE, OCLSyncService
+
+
+NORMALIZED_CODE = "AB12&CD34"
+LOOKUP_SOURCE = "/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/"
+CONCEPT_REFERENCE_URL = f"{LOOKUP_SOURCE}concepts/{quote(NORMALIZED_CODE, safe='')}/"
+WHO_TARGET_URL = "/orgs/WHO/sources/ICD-11-WHO/concepts/AB12/"
+CONCEPT_ENDPOINT_SUFFIX = f"/concepts/{quote(quote(NORMALIZED_CODE, safe=''), safe='')}/"
+CONCEPT_NAMES_SUFFIX = f"{CONCEPT_ENDPOINT_SUFFIX}names/"
+CONCEPT_DESCRIPTIONS_SUFFIX = f"{CONCEPT_ENDPOINT_SUFFIX}descriptions/"
+CONCEPT_MAPPINGS_SUFFIX = f"{CONCEPT_ENDPOINT_SUFFIX}mappings/"
+SOURCE_MAPPINGS_SUFFIX = f"{LOOKUP_SOURCE.rstrip('/')}/mappings/"
 
 
 class FakeResponse:
@@ -30,12 +43,12 @@ class FakeOCLClient:
         return None
 
     def get(self, url, headers=None):
-        if url.endswith("/concepts/AB12%26CD34"):
+        if url.endswith(CONCEPT_ENDPOINT_SUFFIX):
             if self.state["concept_exists"]:
                 return FakeResponse(
                     200,
                     {
-                        "id": "AB12&CD34",
+                        "id": NORMALIZED_CODE,
                         "concept_class": self.state.get("concept_class"),
                         "datatype": self.state.get("datatype"),
                         "extras": dict(self.state.get("extras", {})),
@@ -43,11 +56,14 @@ class FakeOCLClient:
                 )
             return FakeResponse(404, {})
 
-        if url.endswith("/concepts/AB12%26CD34/names/"):
+        if url.endswith(CONCEPT_NAMES_SUFFIX):
             return FakeResponse(200, list(self.state["names"]))
 
-        if url.endswith("/concepts/AB12%26CD34/descriptions/"):
+        if url.endswith(CONCEPT_DESCRIPTIONS_SUFFIX):
             return FakeResponse(200, list(self.state["descriptions"]))
+
+        if url.endswith(CONCEPT_MAPPINGS_SUFFIX):
+            return FakeResponse(200, list(self.state["mappings"]))
 
         return FakeResponse(404, {})
 
@@ -58,7 +74,7 @@ class FakeOCLClient:
             self.state["concept_class"] = json.get("concept_class")
             self.state["datatype"] = json.get("datatype")
             self.state["extras"] = dict(json.get("extras", {}))
-            self.state["names"] = list(json.get("names", []))
+            self.state["names"] = [dict(item) for item in json.get("names", [])]
             return FakeResponse(201, {})
 
         if url.endswith("/names/"):
@@ -73,18 +89,25 @@ class FakeOCLClient:
             self.state["descriptions"].append(payload)
             return FakeResponse(201, payload)
 
+        if "/concepts/" not in url and url.endswith("/mappings/"):
+            payload = dict(json)
+            payload["id"] = f"mapping-{len(self.state['mappings']) + 1}"
+            payload["url"] = f"{url}{payload['id']}/"
+            self.state["mappings"].append(payload)
+            return FakeResponse(201, payload)
+
         return FakeResponse(404, {})
 
     def patch(self, url, json=None, headers=None):
         self.state["patches"].append({"url": url, "json": json})
-        if url.endswith("/concepts/AB12%26CD34"):
+        if url.endswith(CONCEPT_ENDPOINT_SUFFIX):
             self.state["concept_class"] = json.get("concept_class", self.state.get("concept_class"))
             self.state["datatype"] = json.get("datatype", self.state.get("datatype"))
             self.state["extras"] = dict(json.get("extras", self.state.get("extras", {})))
             return FakeResponse(
                 200,
                 {
-                    "id": "AB12&CD34",
+                    "id": NORMALIZED_CODE,
                     "concept_class": self.state.get("concept_class"),
                     "datatype": self.state.get("datatype"),
                     "extras": dict(self.state.get("extras", {})),
@@ -102,6 +125,13 @@ class FakeOCLClient:
             uuid = url.rstrip("/").split("/")[-1]
             for item in self.state["descriptions"]:
                 if item.get("uuid") == uuid:
+                    item.update(json)
+                    return FakeResponse(200, item)
+
+        if "/mappings/" in url:
+            mapping_id = url.rstrip("/").split("/")[-1]
+            for item in self.state["mappings"]:
+                if item.get("id") == mapping_id:
                     item.update(json)
                     return FakeResponse(200, item)
 
@@ -127,17 +157,27 @@ def build_components():
     ]
 
 
-def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
+def expected_extras():
+    return {
+        "isLeaf": True,
+        "Foundation URI": "http://foundation.example/AB12",
+        "Linearization URI": "http://linearization.example/AB12",
+        "DepthInKind": "2",
+        "IsResidual": "False",
+        "BrowserLink": "https://browser.example/AB12",
+        "ChapterNo": "01",
+        "BlockId": "BLOCK-1",
+    }
+
+
+def test_ocl_sync_creates_missing_concept_and_adds_synonym_description_and_mapping(
     monkeypatch,
     db_session,
     seeded_reference_data,
 ):
     monkeypatch.setenv("OCL_TOKEN", "ocl-token")
     monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
-    monkeypatch.setenv(
-        "OCL_LOOKUP_SOURCE",
-        "/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/",
-    )
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
     get_settings.cache_clear()
 
     state = {
@@ -147,6 +187,7 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
         "extras": {},
         "names": [],
         "descriptions": [],
+        "mappings": [],
         "posts": [],
         "patches": [],
     }
@@ -156,7 +197,7 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
     )
 
     synced = service.sync_normalized_result(
-        normalized_code="AB12&CD34",
+        normalized_code=NORMALIZED_CODE,
         title="Alpha condition [Delta qualifier]",
         ai_phrase="Alpha condition with delta qualifier",
         ai_model_name="google/gemini-test",
@@ -166,11 +207,11 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
     assert synced is True
     assert state["posts"][0]["url"].endswith("/concepts/")
     assert state["posts"][0]["json"] == {
-        "id": "AB12&CD34",
+        "id": NORMALIZED_CODE,
         "concept_class": "Diagnosis",
         "datatype": "N/A",
         "retired": False,
-        "extras": {"isLeaf": True, "ChapterNo": "01", "BlockId": "BLOCK-1"},
+        "extras": expected_extras(),
         "names": [
             {
                 "name": "Alpha condition [Delta qualifier]",
@@ -184,7 +225,6 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
         "name": "Alpha condition with delta qualifier",
         "locale": "en",
         "locale_preferred": False,
-        "name_type": None,
     }
     assert state["posts"][2]["json"] == {
         "description": AUTO_DESCRIPTION_TEMPLATE.format(
@@ -193,20 +233,22 @@ def test_ocl_sync_creates_missing_concept_and_adds_synonym_and_description(
         "locale": "en",
         "locale_preferred": False,
     }
+    assert state["posts"][3]["json"] == {
+        "map_type": "NARROWER-THAN",
+        "from_concept_url": CONCEPT_REFERENCE_URL,
+        "to_concept_url": WHO_TARGET_URL,
+    }
     assert state["patches"] == []
 
 
-def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_description(
+def test_ocl_sync_updates_existing_concept_metadata_title_synonym_description_and_mapping(
     monkeypatch,
     db_session,
     seeded_reference_data,
 ):
     monkeypatch.setenv("OCL_TOKEN", "ocl-token")
     monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
-    monkeypatch.setenv(
-        "OCL_LOOKUP_SOURCE",
-        "/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/",
-    )
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
     get_settings.cache_clear()
 
     stem = db_session.scalar(
@@ -236,7 +278,7 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
                 "locale_preferred": False,
                 "name_type": None,
                 "type": "ConceptName",
-            }
+            },
         ],
         "descriptions": [
             {
@@ -244,6 +286,15 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
                 "description": AUTO_DESCRIPTION_TEMPLATE.format(model_name="old-model"),
                 "locale": "en",
                 "locale_preferred": False,
+            }
+        ],
+        "mappings": [
+            {
+                "id": "mapping-1",
+                "url": f"https://api.openconceptlab.org{SOURCE_MAPPINGS_SUFFIX}mapping-1/",
+                "map_type": "NARROWER-THAN",
+                "from_concept_url": CONCEPT_REFERENCE_URL,
+                "to_concept_url": "/orgs/WHO/sources/ICD-11-WHO/concepts/EF56/",
             }
         ],
         "posts": [],
@@ -255,7 +306,7 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
     )
 
     synced = service.sync_normalized_result(
-        normalized_code="AB12&CD34",
+        normalized_code=NORMALIZED_CODE,
         title="New title [New qualifier]",
         ai_phrase="New synonym",
         ai_model_name="new-model",
@@ -264,20 +315,27 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_and_descriptio
 
     assert synced is True
     assert state["posts"] == []
-    assert state["patches"][0]["url"].endswith("/concepts/AB12%26CD34")
+    assert state["patches"][0]["url"].endswith(CONCEPT_ENDPOINT_SUFFIX)
     assert state["patches"][0]["json"] == {
         "concept_class": "Diagnosis",
         "datatype": "N/A",
-        "extras": {"isLeaf": True, "ChapterNo": "01", "BlockId": "BLOCK-1"},
+        "extras": expected_extras(),
     }
     assert "/names/name-fsn/" in state["patches"][1]["url"]
     assert "/names/name-syn/" in state["patches"][2]["url"]
     assert "/descriptions/desc-1/" in state["patches"][3]["url"]
+    assert state["patches"][4]["url"].endswith("/mappings/mapping-1/")
+    assert state["patches"][4]["json"] == {
+        "map_type": "NARROWER-THAN",
+        "from_concept_url": CONCEPT_REFERENCE_URL,
+        "to_concept_url": WHO_TARGET_URL,
+    }
     assert state["concept_class"] == "Diagnosis"
     assert state["datatype"] == "N/A"
-    assert state["extras"] == {"isLeaf": True, "ChapterNo": "01", "BlockId": "BLOCK-1"}
+    assert state["extras"] == expected_extras()
     assert state["names"][0]["name"] == "New title [New qualifier]"
     assert state["names"][1]["name"] == "New synonym"
     assert state["descriptions"][0]["description"] == AUTO_DESCRIPTION_TEMPLATE.format(
         model_name="new-model"
     )
+    assert state["mappings"][0]["to_concept_url"] == WHO_TARGET_URL

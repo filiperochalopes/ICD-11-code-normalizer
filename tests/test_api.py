@@ -93,3 +93,32 @@ def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_d
             "components": ["AB12", "CD34"],
         }
     ]
+
+
+def test_normalize_skips_ai_phrase_for_non_postcoordinated_codes(
+    monkeypatch,
+    db_session,
+    seeded_reference_data,
+):
+    def fail_if_called(self, normalized_code, components, basic_title):
+        raise AssertionError("generate_ai_phrase should not be called for non post-coordinated codes")
+
+    monkeypatch.setattr("app.api.routes.AIPhraseService.generate_ai_phrase", fail_if_called)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/normalize",
+            headers={"Authorization": "Bearer test-token"},
+            json={"codes": ["AB12"], "include_ai_phrase": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {
+            "input_code": "AB12",
+            "normalized_code": "AB12",
+            "title": "Alpha condition",
+            "ai_phrase": None,
+            "from_cache": False,
+        }
+    ]

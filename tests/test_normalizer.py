@@ -1,4 +1,5 @@
 from app.services.cache import CacheService
+from app.services.ai_phrase import AIPhraseService
 from app.services.normalizer import NormalizerService
 from app.services.title_builder import TitleBuilderService
 
@@ -62,3 +63,9 @@ def test_title_builder_uses_deterministic_joiners(db_session, seeded_reference_d
         == "Other specified bacterial intestinal infections [Staphylococcus aureus] / "
         "Methicillin resistant Staphylococcus aureus"
     )
+
+
+def test_ai_phrase_service_only_runs_for_postcoordinated_codes():
+    assert AIPhraseService.should_generate_for_code("AB12&CD34") is True
+    assert AIPhraseService.should_generate_for_code("EF56/AB12&CD34") is True
+    assert AIPhraseService.should_generate_for_code("AB12") is False

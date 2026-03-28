@@ -47,6 +47,13 @@ class AIPhraseService:
         components: list[CodeComponent],
         basic_title: str,
     ) -> AIPhraseResult | None:
+        if not self.should_generate_for_code(normalized_code):
+            logger.info(
+                "Skipping AI phrase generation because normalized_code is not post-coordinated: %s",
+                normalized_code,
+            )
+            return None
+
         if not self._settings.openrouter_api_key.strip():
             logger.info("Skipping AI phrase generation because OPENROUTER_API_KEY is not configured")
             return None
@@ -135,3 +142,7 @@ class AIPhraseService:
                 return value.strip()
 
         return self.model_name
+
+    @staticmethod
+    def should_generate_for_code(normalized_code: str) -> bool:
+        return "/" in normalized_code or "&" in normalized_code

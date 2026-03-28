@@ -47,7 +47,9 @@ def normalize_codes(
             ai_model_name: str | None = None
             from_cache = False
 
-            if payload.include_ai_phrase:
+            if payload.include_ai_phrase and ai_service.should_generate_for_code(
+                normalization_result.normalized_code
+            ):
                 cached = cache_service.get_cached_result(
                     normalized_code=normalization_result.normalized_code,
                     title=title,

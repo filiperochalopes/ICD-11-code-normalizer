@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +45,38 @@ class Settings(BaseSettings):
         alias="OCL_LOOKUP_SOURCE",
     )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    code_normalizer_root_path: str = Field(
+        default="",
+        alias="ROOT_PATH",
+    )
+
+    @field_validator("code_normalizer_root_path", mode="before")
+    @classmethod
+    def normalize_code_normalizer_root_path(cls, value: str | None) -> str:
+        """
+        Normalize the reverse-proxy prefix used by the code-normalizer service.
+
+        Parameters:
+        - value: Raw environment value for ROOT_PATH.
+
+        Returns:
+        - str: Normalized prefix with leading slash and no trailing slash.
+
+        Business Rules:
+        - Empty or unset values disable root_path support.
+        - Prefixes must start with a slash for FastAPI root_path compatibility.
+        - A single slash is treated as no prefix because the service already lives at root internally.
+
+        Examples:
+        - "code-normalizer-api/" -> "/code-normalizer-api"
+        - "" -> ""
+        """
+        candidate = (value or "").strip()
+        if not candidate or candidate == "/":
+            return ""
+        if not candidate.startswith("/"):
+            candidate = f"/{candidate}"
+        return candidate.rstrip("/")
 
     @property
     def database_url(self) -> str:
@@ -79,6 +111,7 @@ class Settings(BaseSettings):
             "ocl_token": self.mask_secret(self.ocl_token),
             "ocl_lookup_source": self.ocl_lookup_source,
             "log_level": self.log_level,
+            "code_normalizer_root_path": self.code_normalizer_root_path,
         }
 
 

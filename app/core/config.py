@@ -45,6 +45,8 @@ class Settings(BaseSettings):
         alias="OCL_LOOKUP_SOURCE",
     )
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    who_icd_api_base_url: str = Field(default="http://icdapi", alias="WHO_ICD_API_BASE_URL")
+    who_icd_release_id: str = Field(default="2026-01", alias="WHO_ICD_RELEASE_ID")
     code_normalizer_root_path: str = Field(
         default="",
         alias="ROOT_PATH",
@@ -111,6 +113,8 @@ class Settings(BaseSettings):
             "ocl_token": self.mask_secret(self.ocl_token),
             "ocl_lookup_source": self.ocl_lookup_source,
             "log_level": self.log_level,
+            "who_icd_api_base_url": self.who_icd_api_base_url,
+            "who_icd_release_id": self.who_icd_release_id,
             "code_normalizer_root_path": self.code_normalizer_root_path,
         }
 

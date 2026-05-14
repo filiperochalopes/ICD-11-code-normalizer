@@ -2,11 +2,11 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "${APP_PORT}:8000"
     environment:
       APP_NAME: ${APP_NAME:-icd11-code-normalizer}
       APP_ENV: production
-      APP_PORT: 8000
+      APP_PORT: ${APP_PORT:-8000}
       SQLITE_PATH: /data/app.db
       AUTH_TOKEN: ${AUTH_TOKEN:-change-me}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -18,6 +18,6 @@ services:
       OCL_TOKEN: ${OCL_TOKEN:-}
       OCL_LOOKUP_SOURCE: ${OCL_LOOKUP_SOURCE:-/orgs/OpenMRS-OCL-Squad/sources/ICD-11-WHO-Mapper/}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      SIMPLE_TABULATION_ZIP_URL: ${SIMPLE_TABULATION_ZIP_URL:-https://icdcdn.who.int/static/releasefiles/2024-01/SimpleTabulation-ICD-11-MMS-en.zip}
+      SIMPLE_TABULATION_ZIP_URL: ${SIMPLE_TABULATION_ZIP_URL:-https://icdcdn.who.int/static/releasefiles/2026-01/SimpleTabulation-ICD-11-MMS-en.zip}
     volumes:
       - ./data:/data

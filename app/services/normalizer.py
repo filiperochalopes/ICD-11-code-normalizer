@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.db.models import SimpleTabulationCode
+
+logger = logging.getLogger(__name__)
 
 
 TOKEN_SPLIT_PATTERN = re.compile(r"([/&])")
@@ -42,8 +47,9 @@ class NormalizationResult:
 
 
 class NormalizerService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
+        self._settings = settings or get_settings()
 
     def normalize(self, raw_expression: str) -> NormalizationResult:
         # Business rule:
@@ -134,6 +140,29 @@ class NormalizerService:
             flattened.extend(cluster.extensions)
         return flattened
 
+    def _fetch_title_from_icd_api(self, code: str) -> str | None:
+        base = self._settings.who_icd_api_base_url
+        release = self._settings.who_icd_release_id
+        headers = {"API-Version": "v2", "Accept-Language": "en"}
+        try:
+            r1 = httpx.get(
+                f"{base}/icd/release/11/{release}/mms/codeInfo/{code}",
+                headers=headers,
+                timeout=5.0,
+            )
+            if r1.status_code != 200:
+                return None
+            stem_id = r1.json().get("stemId", "")
+            if not stem_id:
+                return None
+            entity_url = stem_id.replace("http://id.who.int", base)
+            r2 = httpx.get(entity_url, headers=headers, timeout=5.0)
+            if r2.status_code == 200:
+                return r2.json().get("title", {}).get("@value")
+        except Exception:
+            logger.debug("ICD API fallback failed for code %s", code, exc_info=True)
+        return None
+
     def _hydrate_components(self, components: list[CodeComponent]) -> None:
         codes = [component.code for component in components]
         rows = self.session.scalars(
@@ -145,7 +174,7 @@ class NormalizerService:
             row = lookup.get(component.code)
             if not row:
                 component.is_extension = component.code.startswith("X")
-                component.title = None
+                component.title = self._fetch_title_from_icd_api(component.code)
                 component.sort_key = None
                 continue
 

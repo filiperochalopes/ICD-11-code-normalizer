@@ -381,7 +381,7 @@ class OCLSyncService:
         # code of the already-normalized expression. Extensions never drive chapter,
         # block, or WHO concept mapping metadata.
         first_stem_code = self._find_first_stem_code(components)
-        extras: dict[str, object] = {"isLeaf": True}
+        extras: dict[str, object] = {"isLeaf": self._is_leaf_stem_code(first_stem_code)}
         first_stem_row = self._lookup_code_row(first_stem_code)
         if first_stem_row is None:
             return OCLConceptMetadata(extras=extras, first_stem_code=first_stem_code)
@@ -423,6 +423,20 @@ class OCLSyncService:
         return self._session.scalar(
             select(SimpleTabulationCode).where(SimpleTabulationCode.code == code)
         )
+
+    def _is_leaf_stem_code(self, code: str | None) -> bool:
+        # A stem code is a leaf in the ICD-11 hierarchy when no other tabulation
+        # row points to it as its ``parent_code``. The WHO Simple Tabulation
+        # spreadsheet has no explicit ``IsLeaf`` column, so this children-lookup
+        # is the only signal available here.
+        if self._session is None or not code:
+            return True
+        child_id = self._session.scalar(
+            select(SimpleTabulationCode.id)
+            .where(SimpleTabulationCode.parent_code == code)
+            .limit(1)
+        )
+        return child_id is None
 
     def _resolve_block_id(self, row: SimpleTabulationCode) -> str | None:
         direct_block_id = self._clean_metadata_value(self._raw_row_dict(row).get("BlockId"))

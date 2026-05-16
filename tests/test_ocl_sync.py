@@ -339,3 +339,51 @@ def test_ocl_sync_updates_existing_concept_metadata_title_synonym_description_an
         model_name="new-model"
     )
     assert state["mappings"][0]["to_concept_url"] == WHO_TARGET_URL
+
+
+def test_ocl_sync_marks_non_leaf_stem_with_is_leaf_false(
+    monkeypatch,
+    db_session,
+    seeded_reference_data,
+):
+    # BLOCK-1 has children in the fixture (AB12, EF56, 1A0Y, MG51.00), so the
+    # concept payload sent to OCL must report ``isLeaf: False``.
+    monkeypatch.setenv("OCL_TOKEN", "ocl-token")
+    monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
+    get_settings.cache_clear()
+
+    state = {
+        "concept_exists": False,
+        "concept_class": None,
+        "datatype": None,
+        "extras": {},
+        "names": [],
+        "descriptions": [],
+        "mappings": [],
+        "posts": [],
+        "patches": [],
+    }
+    service = OCLSyncService(
+        session=db_session,
+        client_factory=lambda *args, **kwargs: FakeOCLClient(state),
+    )
+
+    synced = service.sync_normalized_result(
+        normalized_code="BLOCK-1",
+        title="Block One",
+        ai_phrase=None,
+        ai_model_name="google/gemini-test",
+        components=[
+            CodeComponent(
+                code="BLOCK-1",
+                separator=None,
+                original_position=0,
+                is_stem=True,
+                is_extension=False,
+            ),
+        ],
+    )
+
+    assert synced is True
+    assert state["posts"][0]["json"]["extras"]["isLeaf"] is False

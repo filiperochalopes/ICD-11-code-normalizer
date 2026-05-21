@@ -45,4 +45,9 @@ async def log_request_timing(request: Request, call_next):
     return response
 
 
+@app.get("/health", include_in_schema=False)
+async def health():
+    return {"status": "ok"}
+
+
 app.include_router(router)

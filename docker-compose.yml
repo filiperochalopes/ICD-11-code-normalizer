@@ -21,3 +21,14 @@ services:
       SIMPLE_TABULATION_ZIP_URL: ${SIMPLE_TABULATION_ZIP_URL:-https://icdcdn.who.int/static/releasefiles/2026-01/SimpleTabulation-ICD-11-MMS-en.zip}
     volumes:
       - ./data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

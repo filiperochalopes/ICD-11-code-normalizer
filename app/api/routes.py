@@ -47,9 +47,15 @@ def normalize_codes(
             ai_model_name: str | None = None
             from_cache = False
 
-            if payload.include_ai_phrase and ai_service.should_generate_for_code(
-                normalization_result.normalized_code
-            ):
+            should_generate_ai_phrase = (
+                payload.include_ai_phrase
+                and ai_service.should_generate_for_code(
+                    normalization_result.normalized_code
+                )
+            )
+
+            cached = None
+            if should_generate_ai_phrase:
                 cached = cache_service.get_cached_result(
                     normalized_code=normalization_result.normalized_code,
                     title=title,
@@ -57,11 +63,36 @@ def normalize_codes(
                     model_name=ai_service.model_name,
                     prompt_version=ai_service.prompt_version,
                 )
-                if cached and cached.ai_phrase:
-                    ai_phrase = cached.ai_phrase
-                    ai_model_name = cached.resolved_model_name or cached.model_name
-                    from_cache = True
-                else:
+
+            if cached and cached.ai_phrase:
+                ai_phrase = cached.ai_phrase
+                ai_model_name = cached.resolved_model_name or cached.model_name
+                from_cache = True
+
+                normalized_results_service.upsert_result(
+                    normalized_code=normalization_result.normalized_code,
+                    title=title,
+                    ai_phrase=ai_phrase,
+                )
+                db.commit()
+                ocl_sync_service.sync_normalized_result(
+                    normalized_code=normalization_result.normalized_code,
+                    title=title,
+                    ai_phrase=ai_phrase,
+                    ai_model_name=ai_model_name,
+                    components=normalization_result.components,
+                )
+            else:
+                # Publish the OCL skeleton (concept + FSN + WHO mapping) before
+                # the slow LLM call, so external consumers polling OCL find the
+                # concept while AI enrichment is still in flight.
+                ocl_sync_service.sync_concept_skeleton(
+                    normalized_code=normalization_result.normalized_code,
+                    title=title,
+                    components=normalization_result.components,
+                )
+
+                if should_generate_ai_phrase:
                     ai_result = ai_service.generate_ai_phrase(
                         normalized_code=normalization_result.normalized_code,
                         components=normalization_result.components,
@@ -81,19 +112,20 @@ def normalize_codes(
                             resolved_model_name=ai_result.resolved_model_name,
                         )
 
-            normalized_results_service.upsert_result(
-                normalized_code=normalization_result.normalized_code,
-                title=title,
-                ai_phrase=ai_phrase,
-            )
-            db.commit()
-            ocl_sync_service.sync_normalized_result(
-                normalized_code=normalization_result.normalized_code,
-                title=title,
-                ai_phrase=ai_phrase,
-                ai_model_name=ai_model_name,
-                components=normalization_result.components,
-            )
+                normalized_results_service.upsert_result(
+                    normalized_code=normalization_result.normalized_code,
+                    title=title,
+                    ai_phrase=ai_phrase,
+                )
+                db.commit()
+
+                if ai_phrase:
+                    ocl_sync_service.sync_ai_enrichment(
+                        normalized_code=normalization_result.normalized_code,
+                        title=title,
+                        ai_phrase=ai_phrase,
+                        ai_model_name=ai_model_name,
+                    )
 
             results.append(
                 NormalizeResultItem(

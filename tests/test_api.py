@@ -53,9 +53,32 @@ def test_normalize_returns_normalized_codes_and_titles(db_session, seeded_refere
 
 
 def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_data):
-    calls = []
+    skeleton_calls = []
+    enrichment_calls = []
+    full_sync_calls = []
 
-    def fake_sync(
+    def fake_skeleton(self, normalized_code, title, components=None):
+        skeleton_calls.append(
+            {
+                "normalized_code": normalized_code,
+                "title": title,
+                "components": [component.code for component in components or []],
+            }
+        )
+        return True
+
+    def fake_enrichment(self, normalized_code, title, ai_phrase, ai_model_name=None):
+        enrichment_calls.append(
+            {
+                "normalized_code": normalized_code,
+                "title": title,
+                "ai_phrase": ai_phrase,
+                "ai_model_name": ai_model_name,
+            }
+        )
+        return True
+
+    def fake_full_sync(
         self,
         normalized_code,
         title,
@@ -63,18 +86,18 @@ def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_d
         ai_model_name=None,
         components=None,
     ):
-        calls.append(
-            {
-                "normalized_code": normalized_code,
-                "title": title,
-                "ai_phrase": ai_phrase,
-                "ai_model_name": ai_model_name,
-                "components": [component.code for component in components or []],
-            }
-        )
+        full_sync_calls.append(normalized_code)
         return True
 
-    monkeypatch.setattr("app.api.routes.OCLSyncService.sync_normalized_result", fake_sync)
+    monkeypatch.setattr(
+        "app.api.routes.OCLSyncService.sync_concept_skeleton", fake_skeleton
+    )
+    monkeypatch.setattr(
+        "app.api.routes.OCLSyncService.sync_ai_enrichment", fake_enrichment
+    )
+    monkeypatch.setattr(
+        "app.api.routes.OCLSyncService.sync_normalized_result", fake_full_sync
+    )
 
     with TestClient(app) as client:
         response = client.post(
@@ -84,15 +107,17 @@ def test_normalize_triggers_ocl_sync(monkeypatch, db_session, seeded_reference_d
         )
 
     assert response.status_code == 200
-    assert calls == [
+    # With include_ai_phrase=False we publish the skeleton immediately and skip
+    # the enrichment phase (no ai_phrase to add).
+    assert skeleton_calls == [
         {
             "normalized_code": "AB12&CD34",
             "title": "Alpha condition [Delta qualifier]",
-            "ai_phrase": None,
-            "ai_model_name": None,
             "components": ["AB12", "CD34"],
         }
     ]
+    assert enrichment_calls == []
+    assert full_sync_calls == []
 
 
 def test_normalize_skips_ai_phrase_for_non_postcoordinated_codes(

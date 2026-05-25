@@ -37,6 +37,80 @@ class OCLSyncService:
         self._session = session
         self._client_factory = client_factory or httpx.Client
 
+    def sync_concept_skeleton(
+        self,
+        normalized_code: str,
+        title: str,
+        components: list[CodeComponent] | None = None,
+    ) -> bool:
+        # Fast path: create concept + FSN + WHO mapping without waiting on the LLM.
+        # Lets external consumers find the concept on OCL as soon as it has a
+        # normalized code, instead of after AI phrase generation completes.
+        if not self._is_configured():
+            return False
+
+        headers = self._build_headers()
+        source_base_url = self._build_source_base_url()
+        metadata = self._resolve_concept_metadata(components)
+
+        try:
+            with self._client_factory(timeout=30.0, follow_redirects=True) as client:
+                self._sync_concept_and_fsn(
+                    client=client,
+                    source_base_url=source_base_url,
+                    headers=headers,
+                    normalized_code=normalized_code,
+                    title=title,
+                    metadata=metadata,
+                )
+                self._sync_primary_stem_mapping(
+                    client=client,
+                    source_base_url=source_base_url,
+                    headers=headers,
+                    normalized_code=normalized_code,
+                    metadata=metadata,
+                )
+            return True
+        except Exception:
+            logger.exception(
+                "OCL skeleton sync failed for normalized_code=%s", normalized_code
+            )
+            return False
+
+    def sync_ai_enrichment(
+        self,
+        normalized_code: str,
+        title: str,
+        ai_phrase: str | None,
+        ai_model_name: str | None = None,
+    ) -> bool:
+        if not self._is_configured():
+            return False
+
+        cleaned_ai_phrase = (ai_phrase or "").strip()
+        if not cleaned_ai_phrase or cleaned_ai_phrase == title.strip():
+            return False
+
+        headers = self._build_headers()
+        source_base_url = self._build_source_base_url()
+
+        try:
+            with self._client_factory(timeout=30.0, follow_redirects=True) as client:
+                self._sync_ai_synonym_and_description(
+                    client=client,
+                    source_base_url=source_base_url,
+                    headers=headers,
+                    normalized_code=normalized_code,
+                    ai_phrase=cleaned_ai_phrase,
+                    ai_model_name=ai_model_name,
+                )
+            return True
+        except Exception:
+            logger.exception(
+                "OCL enrichment sync failed for normalized_code=%s", normalized_code
+            )
+            return False
+
     def sync_normalized_result(
         self,
         normalized_code: str,
@@ -45,92 +119,160 @@ class OCLSyncService:
         ai_model_name: str | None = None,
         components: list[CodeComponent] | None = None,
     ) -> bool:
-        if not self._settings.ocl_token.strip() or not self._settings.ocl_lookup_source.strip():
-            logger.info("Skipping OCL sync because OCL_TOKEN or OCL_LOOKUP_SOURCE is not configured")
+        if not self._is_configured():
             return False
 
-        headers = {"Authorization": f"Token {self._settings.ocl_token.strip()}"}
+        headers = self._build_headers()
         source_base_url = self._build_source_base_url()
         metadata = self._resolve_concept_metadata(components)
 
         try:
             with self._client_factory(timeout=30.0, follow_redirects=True) as client:
-                concept = self._get_concept(client, source_base_url, headers, normalized_code)
-                if concept is None:
-                    self._create_concept(
-                        client=client,
-                        source_base_url=source_base_url,
-                        headers=headers,
-                        normalized_code=normalized_code,
-                        title=title,
-                        metadata=metadata,
-                    )
-                else:
-                    self._update_concept_if_needed(
-                        client=client,
-                        source_base_url=source_base_url,
-                        headers=headers,
-                        normalized_code=normalized_code,
-                        concept=concept,
-                        metadata=metadata,
-                    )
-
-                names = self._list_names(client, source_base_url, headers, normalized_code)
-                self._upsert_fully_specified_name(
+                self._sync_concept_and_fsn(
                     client=client,
                     source_base_url=source_base_url,
                     headers=headers,
                     normalized_code=normalized_code,
-                    names=names,
+                    title=title,
+                    metadata=metadata,
+                )
+                self._sync_ai_synonym_and_description(
+                    client=client,
+                    source_base_url=source_base_url,
+                    headers=headers,
+                    normalized_code=normalized_code,
+                    ai_phrase=(ai_phrase or "").strip() if ai_phrase else "",
+                    ai_model_name=ai_model_name,
                     title=title,
                 )
-
-                cleaned_ai_phrase = (ai_phrase or "").strip()
-                if cleaned_ai_phrase and cleaned_ai_phrase != title.strip():
-                    names = self._list_names(client, source_base_url, headers, normalized_code)
-                    self._upsert_ai_synonym(
-                        client=client,
-                        source_base_url=source_base_url,
-                        headers=headers,
-                        normalized_code=normalized_code,
-                        names=names,
-                        ai_phrase=cleaned_ai_phrase,
-                    )
-
-                    descriptions = self._list_descriptions(
-                        client,
-                        source_base_url,
-                        headers,
-                        normalized_code,
-                    )
-                    self._upsert_description(
-                        client=client,
-                        source_base_url=source_base_url,
-                        headers=headers,
-                        normalized_code=normalized_code,
-                        descriptions=descriptions,
-                        model_name=ai_model_name or self._settings.openrouter_model,
-                    )
-
-                if metadata.first_stem_code:
-                    mappings = self._list_mappings(
-                        client,
-                        source_base_url,
-                        headers,
-                        normalized_code,
-                    )
-                    self._upsert_primary_stem_mapping(
-                        client=client,
-                        source_base_url=source_base_url,
-                        headers=headers,
-                        normalized_code=normalized_code,
-                        mappings=mappings,
-                        first_stem_code=metadata.first_stem_code,
-                    )
+                self._sync_primary_stem_mapping(
+                    client=client,
+                    source_base_url=source_base_url,
+                    headers=headers,
+                    normalized_code=normalized_code,
+                    metadata=metadata,
+                )
             return True
         except Exception:
             logger.exception("OCL sync failed for normalized_code=%s", normalized_code)
             return False
+
+    def _is_configured(self) -> bool:
+        if not self._settings.ocl_token.strip() or not self._settings.ocl_lookup_source.strip():
+            logger.info(
+                "Skipping OCL sync because OCL_TOKEN or OCL_LOOKUP_SOURCE is not configured"
+            )
+            return False
+        return True
+
+    def _build_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Token {self._settings.ocl_token.strip()}"}
+
+    def _sync_concept_and_fsn(
+        self,
+        client: httpx.Client,
+        source_base_url: str,
+        headers: dict[str, str],
+        normalized_code: str,
+        title: str,
+        metadata: OCLConceptMetadata,
+    ) -> None:
+        concept = self._get_concept(client, source_base_url, headers, normalized_code)
+        if concept is None:
+            self._create_concept(
+                client=client,
+                source_base_url=source_base_url,
+                headers=headers,
+                normalized_code=normalized_code,
+                title=title,
+                metadata=metadata,
+            )
+        else:
+            self._update_concept_if_needed(
+                client=client,
+                source_base_url=source_base_url,
+                headers=headers,
+                normalized_code=normalized_code,
+                concept=concept,
+                metadata=metadata,
+            )
+
+        names = self._list_names(client, source_base_url, headers, normalized_code)
+        self._upsert_fully_specified_name(
+            client=client,
+            source_base_url=source_base_url,
+            headers=headers,
+            normalized_code=normalized_code,
+            names=names,
+            title=title,
+        )
+
+    def _sync_ai_synonym_and_description(
+        self,
+        client: httpx.Client,
+        source_base_url: str,
+        headers: dict[str, str],
+        normalized_code: str,
+        ai_phrase: str,
+        ai_model_name: str | None,
+        title: str | None = None,
+    ) -> None:
+        cleaned_ai_phrase = ai_phrase.strip() if ai_phrase else ""
+        if not cleaned_ai_phrase:
+            return
+        if title is not None and cleaned_ai_phrase == title.strip():
+            return
+
+        names = self._list_names(client, source_base_url, headers, normalized_code)
+        self._upsert_ai_synonym(
+            client=client,
+            source_base_url=source_base_url,
+            headers=headers,
+            normalized_code=normalized_code,
+            names=names,
+            ai_phrase=cleaned_ai_phrase,
+        )
+
+        descriptions = self._list_descriptions(
+            client,
+            source_base_url,
+            headers,
+            normalized_code,
+        )
+        self._upsert_description(
+            client=client,
+            source_base_url=source_base_url,
+            headers=headers,
+            normalized_code=normalized_code,
+            descriptions=descriptions,
+            model_name=ai_model_name or self._settings.openrouter_model,
+        )
+
+    def _sync_primary_stem_mapping(
+        self,
+        client: httpx.Client,
+        source_base_url: str,
+        headers: dict[str, str],
+        normalized_code: str,
+        metadata: OCLConceptMetadata,
+    ) -> None:
+        if not metadata.first_stem_code:
+            return
+
+        mappings = self._list_mappings(
+            client,
+            source_base_url,
+            headers,
+            normalized_code,
+        )
+        self._upsert_primary_stem_mapping(
+            client=client,
+            source_base_url=source_base_url,
+            headers=headers,
+            normalized_code=normalized_code,
+            mappings=mappings,
+            first_stem_code=metadata.first_stem_code,
+        )
 
     def _get_concept(
         self,

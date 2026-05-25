@@ -387,3 +387,144 @@ def test_ocl_sync_marks_non_leaf_stem_with_is_leaf_false(
 
     assert synced is True
     assert state["posts"][0]["json"]["extras"]["isLeaf"] is False
+
+
+def test_sync_concept_skeleton_creates_concept_fsn_and_mapping_without_synonym_or_description(
+    monkeypatch,
+    db_session,
+    seeded_reference_data,
+):
+    monkeypatch.setenv("OCL_TOKEN", "ocl-token")
+    monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
+    get_settings.cache_clear()
+
+    state = {
+        "concept_exists": False,
+        "concept_class": None,
+        "datatype": None,
+        "extras": {},
+        "names": [],
+        "descriptions": [],
+        "mappings": [],
+        "posts": [],
+        "patches": [],
+    }
+    service = OCLSyncService(
+        session=db_session,
+        client_factory=lambda *args, **kwargs: FakeOCLClient(state),
+    )
+
+    synced = service.sync_concept_skeleton(
+        normalized_code=NORMALIZED_CODE,
+        title="Alpha condition [Delta qualifier]",
+        components=build_components(),
+    )
+
+    assert synced is True
+    post_urls = [post["url"] for post in state["posts"]]
+    assert any(url.endswith("/concepts/") for url in post_urls)
+    assert any(url.endswith(SOURCE_MAPPINGS_SUFFIX) for url in post_urls)
+    assert not any(url.endswith(CONCEPT_DESCRIPTIONS_SUFFIX) for url in post_urls)
+    # No synonym POST: the FSN is created together with the concept payload,
+    # and no other /names/ POST should happen during the skeleton phase.
+    assert not any(url.endswith(CONCEPT_NAMES_SUFFIX) for url in post_urls)
+    assert state["descriptions"] == []
+    # Only the FSN was attached to the concept payload.
+    assert len(state["names"]) == 1
+    assert state["names"][0]["name_type"] == "FULLY_SPECIFIED"
+
+
+def test_sync_ai_enrichment_adds_synonym_and_description_to_existing_concept(
+    monkeypatch,
+    db_session,
+    seeded_reference_data,
+):
+    monkeypatch.setenv("OCL_TOKEN", "ocl-token")
+    monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
+    get_settings.cache_clear()
+
+    state = {
+        "concept_exists": True,
+        "concept_class": "Diagnosis",
+        "datatype": "N/A",
+        "extras": dict(expected_extras()),
+        "names": [
+            {
+                "uuid": "name-fsn",
+                "name": "Alpha condition [Delta qualifier]",
+                "locale": "en",
+                "locale_preferred": True,
+                "name_type": "FULLY_SPECIFIED",
+                "type": "ConceptName",
+            }
+        ],
+        "descriptions": [],
+        "mappings": [],
+        "posts": [],
+        "patches": [],
+    }
+    service = OCLSyncService(
+        session=db_session,
+        client_factory=lambda *args, **kwargs: FakeOCLClient(state),
+    )
+
+    synced = service.sync_ai_enrichment(
+        normalized_code=NORMALIZED_CODE,
+        title="Alpha condition [Delta qualifier]",
+        ai_phrase="Alpha condition with delta qualifier",
+        ai_model_name="google/gemini-test",
+    )
+
+    assert synced is True
+    post_urls = [post["url"] for post in state["posts"]]
+    assert any(url.endswith(CONCEPT_NAMES_SUFFIX) for url in post_urls)
+    assert any(url.endswith(CONCEPT_DESCRIPTIONS_SUFFIX) for url in post_urls)
+    # Enrichment must not touch the concept itself or the mappings endpoint.
+    assert not any(url.endswith("/concepts/") for url in post_urls)
+    assert not any(url.endswith(SOURCE_MAPPINGS_SUFFIX) for url in post_urls)
+    assert state["patches"] == []
+    synonym = next(name for name in state["names"] if name["uuid"] != "name-fsn")
+    assert synonym["name"] == "Alpha condition with delta qualifier"
+    assert state["descriptions"][0]["description"] == AUTO_DESCRIPTION_TEMPLATE.format(
+        model_name="google/gemini-test"
+    )
+
+
+def test_sync_ai_enrichment_skips_when_phrase_matches_title(
+    monkeypatch,
+    db_session,
+    seeded_reference_data,
+):
+    monkeypatch.setenv("OCL_TOKEN", "ocl-token")
+    monkeypatch.setenv("OCL_BASE_URL", "https://api.openconceptlab.org")
+    monkeypatch.setenv("OCL_LOOKUP_SOURCE", LOOKUP_SOURCE)
+    get_settings.cache_clear()
+
+    state = {
+        "concept_exists": True,
+        "concept_class": "Diagnosis",
+        "datatype": "N/A",
+        "extras": {},
+        "names": [],
+        "descriptions": [],
+        "mappings": [],
+        "posts": [],
+        "patches": [],
+    }
+    service = OCLSyncService(
+        session=db_session,
+        client_factory=lambda *args, **kwargs: FakeOCLClient(state),
+    )
+
+    synced = service.sync_ai_enrichment(
+        normalized_code=NORMALIZED_CODE,
+        title="Same phrase",
+        ai_phrase="Same phrase",
+        ai_model_name="m",
+    )
+
+    assert synced is False
+    assert state["posts"] == []
+    assert state["patches"] == []

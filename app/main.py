@@ -7,10 +7,12 @@ from fastapi import FastAPI, Request
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.observability import init_sentry
 from app.db.init_db import init_db
 
 
 configure_logging()
+init_sentry()
 logger = logging.getLogger(__name__)
 
 

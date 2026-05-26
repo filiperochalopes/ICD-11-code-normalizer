@@ -51,6 +51,11 @@ class Settings(BaseSettings):
         default="",
         alias="ROOT_PATH",
     )
+    sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
+    sentry_traces_sample_rate: float = Field(
+        default=0.0, alias="SENTRY_TRACES_SAMPLE_RATE"
+    )
+    sentry_environment: str = Field(default="", alias="SENTRY_ENVIRONMENT")
 
     @field_validator("code_normalizer_root_path", mode="before")
     @classmethod
@@ -116,6 +121,9 @@ class Settings(BaseSettings):
             "who_icd_api_base_url": self.who_icd_api_base_url,
             "who_icd_release_id": self.who_icd_release_id,
             "code_normalizer_root_path": self.code_normalizer_root_path,
+            "sentry_dsn": self.mask_secret(self.sentry_dsn),
+            "sentry_traces_sample_rate": self.sentry_traces_sample_rate,
+            "sentry_environment": self.sentry_environment or self.app_env,
         }
 
 

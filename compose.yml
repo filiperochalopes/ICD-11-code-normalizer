@@ -1,6 +1,7 @@
 services:
-  app:
+  icd11-code-normalizer:
     build: .
+    container_name: icd11-code-normalizer
     ports:
       - "${APP_PORT}:8000"
     environment:
